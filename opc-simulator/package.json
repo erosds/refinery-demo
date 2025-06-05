@@ -1,0 +1,14 @@
+{
+  "name": "demo-opc-simulator",
+  "version": "1.0.0",
+  "description": "OPC-UA Simulator for demo Demo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "node-opcua": "^2.106.0"
+  },
+  "author": "erosdesimone",
+  "license": "MIT"
+}
