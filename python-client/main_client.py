@@ -209,7 +209,49 @@ class RefineryDataClient:
         # OPC-UA client
         self.opc_client = Client(self.opc_url)
         logger.info(f"🔗 OPC-UA client configured for {self.opc_url}")
-    
+        
+    async def debug_opc_structure(self):
+        """Debug OPC-UA server structure"""
+        try:
+            await self.opc_client.connect()
+            logger.info("🔍 Connected to OPC server, browsing structure...")
+            
+            root_node = self.opc_client.get_root_node()
+            objects_node = await root_node.get_child(["0:Objects"])
+            
+            # Lista tutti i nodi sotto Objects
+            children = await objects_node.get_children()
+            logger.info(f"📋 Found {len(children)} nodes under Objects:")
+            
+            for child in children:
+                display_name = await child.read_display_name()
+                browse_name = await child.read_browse_name()
+                logger.info(f"  - {display_name} (browse: {browse_name})")
+                
+                # Se trova un nodo che contiene dati della raffineria
+                try:
+                    grandchildren = await child.get_children()
+                    if len(grandchildren) > 5:  # Probabilmente il nodo con le variabili
+                        logger.info(f"    🎯 Found {len(grandchildren)} variables in {display_name}")
+                        for var in grandchildren[:5]:  # Mostra prime 5
+                            var_name = await var.read_browse_name()
+                            try:
+                                value = await var.read_value()
+                                logger.info(f"      - {var_name}: {value}")
+                            except:
+                                logger.info(f"      - {var_name}: (read failed)")
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"❌ OPC debug failed: {e}")
+        finally:
+            try:
+                await self.opc_client.disconnect()
+            except:
+                pass
+
+        
     async def read_opc_data(self) -> Dict:
         """Legge dati dal server OPC-UA con fallback robusto"""
         data = {}
@@ -276,6 +318,67 @@ class RefineryDataClient:
                     variance = 0.02 if 'bit_tq' in key else 0.01
                     data[key] = data[key] * (1 + (np.random.random() - 0.5) * variance)
                     
+        return data
+    
+    async def read_opc_data_improved(self) -> Dict:
+        """Lettura OPC migliorata con debug"""
+        data = {}
+        
+        try:
+            await self.opc_client.connect()
+            logger.info("🔗 OPC connected, searching for data nodes...")
+            
+            root_node = self.opc_client.get_root_node()
+            objects_node = await root_node.get_child(["0:Objects"])
+            children = await objects_node.get_children()
+            
+            # Cerca il nodo con più variabili (probabilmente il nostro)
+            best_node = None
+            max_vars = 0
+            
+            for child in children:
+                try:
+                    vars_count = len(await child.get_children())
+                    if vars_count > max_vars:
+                        max_vars = vars_count
+                        best_node = child
+                except:
+                    continue
+            
+            if best_node:
+                logger.info(f"📊 Using node with {max_vars} variables")
+                var_children = await best_node.get_children()
+                
+                for var_node in var_children:
+                    try:
+                        browse_name = await var_node.read_browse_name()
+                        var_name = str(browse_name).split(":")[-1]
+                        value = await var_node.read_value()
+                        data[var_name] = float(value)
+                        logger.info(f"✅ {var_name}: {value}")
+                    except Exception as e:
+                        logger.warning(f"⚠️  Failed to read {var_name}: {e}")
+            
+            if not data:
+                logger.warning("⚠️  No data found, using fallback")
+                data = self.fallback_data.copy()
+                
+        except Exception as e:
+            logger.warning(f"⚠️  OPC connection failed: {e}")
+            data = self.fallback_data.copy()
+        finally:
+            try:
+                await self.opc_client.disconnect()
+            except:
+                pass
+        
+        # Applica variazioni realistiche ai dati fallback
+        if len(data) <= len(self.fallback_data):
+            for key in data:
+                if key not in ['system_status', 'operator_mode']:
+                    variance = 0.02 if 'bit_tq' in key else 0.01
+                    data[key] = data[key] * (1 + (np.random.random() - 0.5) * variance)
+        
         return data
     
     def store_process_data(self, data: Dict, data_source: str = 'opc_ua'):
