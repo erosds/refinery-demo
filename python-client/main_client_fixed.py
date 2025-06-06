@@ -297,10 +297,14 @@ class RefineryDataClient:
         energy_efficiency = max(0, 100 - ((energy - 1200) / 10)) if energy > 0 else 0
         return (bit_tq_efficiency + energy_efficiency) / 2
     
+    # Sostituisci il metodo run_demo_cycle in python-client/main_client_fixed.py
+    # con questa versione che genera più decisioni AI:
+
     async def run_demo_cycle(self):
-        """Ciclo principale della demo"""
-        logger.info("🎬 Starting Demo Demo Cycle...")
+        """Ciclo principale della demo con più decisioni AI"""
+        logger.info("🎬 Starting Enhanced Demo Cycle...")
         cycle_count = 0
+        last_ai_decision_time = 0
         
         while True:
             try:
@@ -308,25 +312,64 @@ class RefineryDataClient:
                 logger.info(f"🔄 Demo Cycle #{cycle_count}")
                 
                 current_data = await self.read_opc_data()
-                logger.info(f"📊 Current BIT-TQ: {current_data.get('bit_tq', 0):.1f}")
+                current_bit_tq = current_data.get('bit_tq', 45.0)
+                logger.info(f"📊 Current BIT-TQ: {current_bit_tq:.1f}")
                 
                 data_source = 'ai_control' if current_data.get('operator_mode') == 1 else 'human_control'
                 self.store_process_data(current_data, data_source)
                 
-                bit_tq = current_data.get('bit_tq', 45.0)
-                if bit_tq < 50.0 or bit_tq < 40 or bit_tq > 60:
-                    ai_decision = self.ai_model.generate_optimization_decision(current_data)
-                    if ai_decision:
-                        self.store_ai_decision(ai_decision)
-                        logger.info("✅ AI decision processed")
+                # Genera decisioni AI più frequentemente per la demo
+                current_time = time.time()
+                
+                # Condizioni per generare decisione AI:
+                # 1. BIT-TQ sotto target (< 50)
+                # 2. Ogni 60 secondi se non ci sono decisioni pendenti
+                # 3. Se rilevata anomalia
+                should_generate_decision = (
+                    current_bit_tq < 50.0 or  # Sotto target
+                    current_bit_tq < 40 or current_bit_tq > 60 or  # Anomalia
+                    (current_time - last_ai_decision_time) > 60  # Ogni minuto
+                )
+                
+                if should_generate_decision:
+                    # Verifica se ci sono decisioni pendenti
+                    pending_decisions = self._check_pending_decisions()
+                    
+                    if not pending_decisions:
+                        ai_decision = self.ai_model.generate_optimization_decision(current_data)
+                        if ai_decision:
+                            self.store_ai_decision(ai_decision)
+                            last_ai_decision_time = current_time
+                            logger.info("✅ New AI decision generated and stored")
+                            
+                            # Se BIT-TQ è molto basso, suggerisci applicazione immediata
+                            if current_bit_tq < 45:
+                                logger.warning("⚠️ BIT-TQ critically low! Consider applying AI decision immediately.")
+                    else:
+                        logger.info("ℹ️ AI decision pending application, skipping new generation")
                 else:
-                    logger.info("ℹ️  BIT-TQ within target range, no AI intervention needed")
+                    logger.info("ℹ️ BIT-TQ within acceptable range, monitoring...")
                 
                 await asyncio.sleep(15)
                 
             except Exception as e:
                 logger.error(f"❌ Demo cycle error: {e}")
                 await asyncio.sleep(10)
+
+    def _check_pending_decisions(self):
+        """Verifica se ci sono decisioni AI in attesa di applicazione"""
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM ai_decisions 
+                WHERE decision_applied = false 
+                AND timestamp > NOW() - INTERVAL '5 minutes'
+            """)
+            result = cursor.fetchone()
+            return result[0] > 0 if result else False
+        except Exception as e:
+            logger.error(f"Error checking pending decisions: {e}")
+            return False
 
 
 async def main():

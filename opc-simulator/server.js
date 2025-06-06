@@ -97,7 +97,7 @@ function startDataSimulation() {
         Object.keys(refineryData).forEach(param => {
             const data = refineryData[param];
             
-            if (param === 'system_status' || param === 'operator_mode' || param === 'last_ai_decision') {
+            if (param === 'system_status' || param === 'last_ai_decision') {
                 return; // Skip status variables in normal simulation
             }
             
@@ -108,30 +108,109 @@ function startDataSimulation() {
             // Mantieni nei limiti
             newValue = Math.max(data.min, Math.min(data.max, newValue));
             
-            // Correlazioni realistiche (dalla PoC: fc1065 influenza bit_tq)
+            // Correlazioni realistiche potenziate per demo
             if (param === 'bit_tq') {
-                const fc1065_influence = (refineryData.fc1065.value - 127.3) * 0.1;
-                const li40054_influence = (refineryData.li40054.value - 68.2) * 0.08;
-                newValue += fc1065_influence + li40054_influence;
+                const fc1065_influence = (refineryData.fc1065.value - 127.3) * 0.15; // Aumentato da 0.1
+                const li40054_influence = (refineryData.li40054.value - 68.2) * 0.12; // Aumentato da 0.08
+                const fc31007_influence = (refineryData.fc31007.value - 89.1) * -0.08; // Correlazione negativa
+                const pi18213_influence = (refineryData.pi18213.value - 2.14) * 8; // Aumentato
+                
+                newValue += fc1065_influence + li40054_influence + fc31007_influence + pi18213_influence;
+                
+                // Se in modalità AI, applica miglioramento graduale
+                if (refineryData.operator_mode.value === 1) {
+                    const target_bit_tq = 52.0; // Target per modalità AI
+                    const improvement_rate = 0.3; // Velocità miglioramento
+                    newValue = newValue + (target_bit_tq - newValue) * improvement_rate;
+                }
+                
+                // Assicurati che BIT-TQ rimanga realistico
+                newValue = Math.max(35, Math.min(65, newValue));
             }
             
             if (param === 'energy_consumption') {
-                // Energia correlata a flusso ricircolo
+                // Energia correlata a flusso ricircolo e modalità
                 const hvbgo_influence = (refineryData.hvbgo_flow.value - 156.8) * 2.5;
                 newValue += hvbgo_influence;
+                
+                // In modalità AI, riduci energia
+                if (refineryData.operator_mode.value === 1) {
+                    const efficiency_factor = 0.92; // 8% risparmio energetico
+                    newValue = newValue * efficiency_factor;
+                }
             }
             
             if (param === 'co2_emissions') {
                 // CO2 correlata a consumo energia
                 const energy_ratio = refineryData.energy_consumption.value / 1250.0;
                 newValue = 34.5 * energy_ratio + (Math.random() - 0.5) * 2;
+                
+                // In modalità AI, riduci CO2
+                if (refineryData.operator_mode.value === 1) {
+                    const emission_factor = 0.88; // 12% riduzione CO2
+                    newValue = newValue * emission_factor;
+                }
+            }
+            
+            if (param === 'hvbgo_flow') {
+                // Ottimizza flusso ricircolo in modalità AI
+                if (refineryData.operator_mode.value === 1) {
+                    const optimal_flow = 148.5; // Flusso ottimizzato
+                    const adjustment_rate = 0.2;
+                    newValue = newValue + (optimal_flow - newValue) * adjustment_rate;
+                }
             }
             
             refineryData[param].value = newValue;
         });
         
-    }, 3000); // Aggiorna ogni 3 secondi (come specificato nella PoC)
+        // Log miglioramenti quando in modalità AI
+        if (refineryData.operator_mode.value === 1) {
+            const currentTime = Date.now();
+            if (!global.lastAILogTime || currentTime - global.lastAILogTime > 30000) { // Log ogni 30 secondi
+                console.log(`🤖 AI Mode Active - BIT-TQ: ${refineryData.bit_tq.value.toFixed(1)}, Energy: ${refineryData.energy_consumption.value.toFixed(0)} MWh, CO2: ${refineryData.co2_emissions.value.toFixed(1)} ton/h`);
+                global.lastAILogTime = currentTime;
+            }
+        }
+        
+    }, 3000); // Aggiorna ogni 3 secondi
 }
+
+// Aggiungi anche questa funzione per gestire meglio i cambiamenti di parametri
+server.on("post_initialize", () => {
+    console.log("🔧 Server post-initialization complete");
+    
+    // Monitora cambiamenti dei parametri per applicazione AI
+    Object.keys(opcVariables).forEach(paramName => {
+        const variable = opcVariables[paramName];
+        
+        variable.on("value_changed", (dataValue) => {
+            const newValue = dataValue.value.value;
+            const oldValue = refineryData[paramName].value;
+            
+            // Se il valore è cambiato significativamente, probabilmente è un'applicazione AI
+            const changePercent = Math.abs((newValue - oldValue) / oldValue) * 100;
+            
+            if (changePercent > 2 && paramName !== 'bit_tq') { // Cambio > 2% (escluso BIT-TQ che è output)
+                console.log(`📝 Parameter ${paramName} changed: ${oldValue.toFixed(2)} → ${newValue.toFixed(2)} (${changePercent.toFixed(1)}% change)`);
+                
+                // Se è un cambio significativo su parametri chiave, potrebbe essere AI
+                if (['fc1065', 'li40054', 'fc31007', 'pi18213'].includes(paramName) && changePercent > 3) {
+                    console.log(`🤖 Possible AI parameter application detected for ${paramName}`);
+                    
+                    // Imposta flag per indicare decisione AI applicata
+                    setTimeout(() => {
+                        refineryData.last_ai_decision.value = 1;
+                        console.log("✅ AI decision flag set");
+                    }, 1000);
+                }
+            }
+            
+            // Aggiorna il valore interno
+            refineryData[paramName].value = newValue;
+        });
+    });
+});
 
 function startDemoScenarios() {
     console.log("🎬 Starting demo scenarios...");

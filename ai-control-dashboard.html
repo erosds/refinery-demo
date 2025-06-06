@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo - AI Control Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1f1f23;
+            color: #fff;
+            overflow-x: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2d3748, #4a5568);
+            padding: 20px;
+            text-align: center;
+            border-bottom: 3px solid #38a169;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #38a169, #68d391);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .control-panel {
+            background: #2d3748;
+            margin: 20px;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            border: 1px solid #4a5568;
+        }
+        
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .control-card {
+            background: #1a202c;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #4a5568;
+            text-align: center;
+        }
+        
+        .control-card h3 {
+            color: #38a169;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+            min-width: 180px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #38a169, #48bb78);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #2f855a, #38a169);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(56, 161, 105, 0.4);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #ed8936, #f6ad55);
+            color: white;
+        }
+        
+        .btn-warning:hover {
+            background: linear-gradient(135deg, #dd6b20, #ed8936);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(237, 137, 54, 0.4);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #e53e3e, #fc8181);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: linear-gradient(135deg, #c53030, #e53e3e);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(229, 62, 62, 0.4);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        .status-display {
+            background: #1a202c;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 4px solid #38a169;
+        }
+        
+        .status-display h4 {
+            color: #38a169;
+            margin-bottom: 10px;
+        }
+        
+        .grafana-container {
+            margin: 20px;
+            background: #2d3748;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        
+        .grafana-frame {
+            width: 100%;
+            height: 800px;
+            border: none;
+            background: #1f1f23;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        
+        .notification.show {
+            transform: translateX(0);
+        }
+        
+        .notification.success {
+            background: linear-gradient(135deg, #38a169, #48bb78);
+        }
+        
+        .notification.error {
+            background: linear-gradient(135deg, #e53e3e, #fc8181);
+        }
+        
+        .notification.info {
+            background: linear-gradient(135deg, #3182ce, #63b3ed);
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .metric {
+            display: inline-block;
+            margin: 0 15px;
+            padding: 10px 15px;
+            background: rgba(56, 161, 105, 0.1);
+            border-radius: 8px;
+            border: 1px solid rgba(56, 161, 105, 0.3);
+        }
+        
+        .metric-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #38a169;
+        }
+        
+        .metric-label {
+            font-size: 0.9em;
+            color: #a0aec0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏭 Demo - AI Control Dashboard</h1>
+        <p>Sistema di controllo AI per ottimizzazione processi di raffineria</p>
+    </div>
+
+    <div class="control-panel">
+        <h2>🤖 Pannello di Controllo AI</h2>
+        
+        <div class="control-grid">
+            <div class="control-card">
+                <h3>📊 Stato Attuale</h3>
+                <div id="current-status">
+                    <div class="metric">
+                        <div class="metric-value" id="current-bittq">--</div>
+                        <div class="metric-label">BIT-TQ Attuale</div>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="checkStatus()" id="check-status-btn">
+                    🔍 Aggiorna Stato
+                </button>
+            </div>
+            
+            <div class="control-card">
+                <h3>🧠 Decisioni AI</h3>
+                <button class="btn btn-warning" onclick="getLatestDecision()" id="get-decision-btn">
+                    📋 Visualizza Ultima Decisione
+                </button>
+                <button class="btn btn-primary" onclick="applyAIDecision()" id="apply-decision-btn">
+                    ⚡ Applica Decisione AI
+                </button>
+            </div>
+            
+            <div class="control-card">
+                <h3>🔄 Controllo Sistema</h3>
+                <button class="btn btn-danger" onclick="resetToHuman()" id="reset-btn">
+                    👨‍🔧 Reset Controllo Umano
+                </button>
+                <button class="btn btn-primary" onclick="refreshDashboard()" id="refresh-btn">
+                    🔄 Aggiorna Dashboard
+                </button>
+            </div>
+        </div>
+        
+        <div class="status-display" id="status-display">
+            <h4>📈 Status Sistema</h4>
+            <p id="status-text">Sistema pronto. Clicca "Aggiorna Stato" per le informazioni più recenti.</p>
+        </div>
+    </div>
+
+    <div class="grafana-container">
+        <iframe 
+            class="grafana-frame" 
+            src="http://localhost:3000/d/dashboard-demo-refinery-enhanced/demo-refinery-ai-analytics-enhanced?orgId=1&refresh=5s&kiosk=tv"
+            id="grafana-frame">
+        </iframe>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+        
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.classList.add('show');
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 4000);
+        }
+        
+        function setButtonLoading(buttonId, loading = true) {
+            const button = document.getElementById(buttonId);
+            if (loading) {
+                button.disabled = true;
+                button.innerHTML = '<span class="loading"></span>' + button.textContent;
+            } else {
+                button.disabled = false;
+                button.innerHTML = button.textContent.replace(/^.*?(?=[A-Za-z])/, '');
+            }
+        }
+        
+        async function apiCall(endpoint, method = 'GET') {
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                return await response.json();
+            } catch (error) {
+                console.error('API Error:', error);
+                throw error;
+            }
+        }
+        
+        async function checkStatus() {
+            setButtonLoading('check-status-btn', true);
+            
+            try {
+                const status = await apiCall('/status');
+                showNotification('✅ Sistema API funzionante', 'success');
+                
+                // Simula recupero BIT-TQ attuale (potresti implementare un endpoint specifico)
+                const currentBitTq = 45.2 + Math.random() * 10; // Simulated
+                document.getElementById('current-bittq').textContent = currentBitTq.toFixed(1);
+                
+                document.getElementById('status-text').innerHTML = 
+                    `<strong>✅ Sistema Operativo</strong><br>
+                     API Server: Attivo<br>
+                     Ultimo aggiornamento: ${new Date().toLocaleTimeString()}`;
+                
+            } catch (error) {
+                showNotification('❌ Errore connessione API: ' + error.message, 'error');
+                document.getElementById('status-text').innerHTML = 
+                    '<strong>❌ Errore Sistema</strong><br>Verificare che l\'API server sia attivo su porta 5000';
+            } finally {
+                setButtonLoading('check-status-btn', false);
+            }
+        }
+        
+        async function getLatestDecision() {
+            setButtonLoading('get-decision-btn', true);
+            
+            try {
+                const result = await apiCall('/ai-decisions/latest');
+                
+                if (result.success && result.decision) {
+                    const decision = result.decision;
+                    showNotification('📋 Decisione AI trovata!', 'info');
+                    
+                    document.getElementById('status-text').innerHTML = 
+                        `<strong>🤖 Ultima Decisione AI</strong><br>
+                         Confidenza: ${(decision.confidence * 100).toFixed(1)}%<br>
+                         BIT-TQ Previsto: ${decision.predicted_bit_tq?.toFixed(1) || 'N/A'}<br>
+                         Risparmio Energetico: ${(decision.predicted_energy_saving * 100).toFixed(1)}%<br>
+                         Timestamp: ${new Date(decision.timestamp).toLocaleString()}`;
+                         
+                } else {
+                    showNotification('ℹ️ Nessuna decisione AI in attesa', 'info');
+                    document.getElementById('status-text').innerHTML = 
+                        '<strong>ℹ️ Nessuna Decisione in Attesa</strong><br>Il sistema non ha generato nuove raccomandazioni';
+                }
+                
+            } catch (error) {
+                showNotification('❌ Errore recupero decisione: ' + error.message, 'error');
+            } finally {
+                setButtonLoading('get-decision-btn', false);
+            }
+        }
+        
+        async function applyAIDecision() {
+            if (!confirm('Sei sicuro di voler applicare la decisione AI? Questo modificherà i parametri del processo.')) {
+                return;
+            }
+            
+            setButtonLoading('apply-decision-btn', true);
+            
+            try {
+                const result = await apiCall('/ai-decisions/apply', 'POST');
+                
+                if (result.success) {
+                    showNotification('🚀 Decisione AI applicata con successo!', 'success');
+                    
+                    document.getElementById('status-text').innerHTML = 
+                        `<strong>✅ Decisione AI Applicata</strong><br>
+                         BIT-TQ Previsto: ${result.predicted_bit_tq?.toFixed(1) || 'N/A'}<br>
+                         Confidenza: ${(result.confidence * 100).toFixed(1)}%<br>
+                         Parametri modificati: ${Object.keys(result.applied_parameters || {}).length}<br>
+                         <em>Controlla i grafici per vedere i miglioramenti!</em>`;
+                    
+                    // Refresh automatico dashboard dopo 2 secondi
+                    setTimeout(refreshDashboard, 2000);
+                    
+                } else {
+                    showNotification('⚠️ ' + (result.message || 'Errore applicazione decisione'), 'error');
+                }
+                
+            } catch (error) {
+                showNotification('❌ Errore applicazione: ' + error.message, 'error');
+            } finally {
+                setButtonLoading('apply-decision-btn', false);
+            }
+        }
+        
+        async function resetToHuman() {
+            if (!confirm('Confermi il reset al controllo umano? I parametri torneranno ai valori baseline.')) {
+                return;
+            }
+            
+            setButtonLoading('reset-btn', true);
+            
+            try {
+                const result = await apiCall('/process/reset', 'POST');
+                
+                if (result.success) {
+                    showNotification('🔄 Sistema resettato al controllo umano', 'success');
+                    
+                    document.getElementById('status-text').innerHTML = 
+                        `<strong>🔄 Controllo Umano Attivato</strong><br>
+                         Parametri ripristinati ai valori baseline<br>
+                         Modalità: Controllo Manuale<br>
+                         Timestamp: ${new Date().toLocaleString()}`;
+                    
+                    setTimeout(refreshDashboard, 2000);
+                    
+                } else {
+                    showNotification('❌ ' + (result.message || 'Errore reset sistema'), 'error');
+                }
+                
+            } catch (error) {
+                showNotification('❌ Errore reset: ' + error.message, 'error');
+            } finally {
+                setButtonLoading('reset-btn', false);
+            }
+        }
+        
+        function refreshDashboard() {
+            setButtonLoading('refresh-btn', true);
+            
+            const iframe = document.getElementById('grafana-frame');
+            const currentSrc = iframe.src;
+            
+            // Forza refresh aggiungendo timestamp
+            const separator = currentSrc.includes('?') ? '&' : '?';
+            iframe.src = currentSrc.split('&_refresh=')[0] + separator + '_refresh=' + Date.now();
+            
+            showNotification('🔄 Dashboard aggiornata', 'info');
+            
+            setTimeout(() => {
+                setButtonLoading('refresh-btn', false);
+            }, 1000);
+        }
+        
+        // Auto-refresh ogni 30 secondi
+        setInterval(() => {
+            if (!document.hidden) {
+                checkStatus();
+            }
+        }, 30000);
+        
+        // Inizializzazione
+        document.addEventListener('DOMContentLoaded', () => {
+            checkStatus();
+            showNotification('🎉 Dashboard AI Control caricata!', 'success');
+        });
+    </script>
+</body>
+</html>
