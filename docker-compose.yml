@@ -26,7 +26,9 @@ services:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
-      # Plugins rimossi per evitare problemi SSL in demo
+      GF_SECURITY_ALLOW_EMBEDDING: true
+      GF_AUTH_ANONYMOUS_ENABLED: true
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana-config/provisioning:/etc/grafana/provisioning
@@ -58,6 +60,25 @@ services:
       DB_USER: postgres
       DB_PASSWORD: password
       DB_NAME: refinery_db
+    restart: unless-stopped
+
+  api-server:
+    build: ./api-server
+    container_name: demo-api-server
+    ports:
+      - "5000:5000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      opc-simulator:
+        condition: service_healthy
+    environment:
+      DB_HOST: timescaledb
+      OPC_HOST: opc-simulator
+      DB_USER: postgres
+      DB_PASSWORD: password
+      DB_NAME: refinery_db
+      FLASK_ENV: production
     restart: unless-stopped
 
 volumes:
