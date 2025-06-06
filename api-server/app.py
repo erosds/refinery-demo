@@ -1,12 +1,12 @@
 """
-API Server per applicare decisioni AI al server OPC-UA
-Espone endpoint REST per la dashboard Grafana
+API Server per TimescaleDB - Gestisce hypertable senza PRIMARY KEY
 """
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import asyncio
 import psycopg2
+from psycopg2.extras import RealDictCursor
 from asyncua import Client
 import json
 import os
@@ -30,44 +30,116 @@ class AIDecisionApplier:
             'password': os.getenv('DB_PASSWORD', 'password'),
             'port': 5432
         }
+    
+    def ensure_id_column_exists(self):
+        """Assicura che la colonna ID esista (non PRIMARY KEY per TimescaleDB)"""
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cursor = conn.cursor()
+            
+            # Controlla se la colonna id esiste
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='ai_decisions' AND column_name='id'
+            """)
+            
+            if not cursor.fetchone():
+                logger.info("Adding missing ID column to ai_decisions hypertable...")
+                # Per TimescaleDB hypertable, aggiungi solo SERIAL (non PRIMARY KEY)
+                cursor.execute("ALTER TABLE ai_decisions ADD COLUMN id SERIAL")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_decisions_id ON ai_decisions(id)")
+                conn.commit()
+                logger.info("✅ ID column added successfully")
+            
+            conn.close()
+            
+        except Exception as e:
+            logger.error(f"Error ensuring ID column exists: {e}")
         
     def get_latest_ai_decision(self) -> Optional[Dict]:
         """Recupera l'ultima decisione AI non ancora applicata"""
         try:
             conn = psycopg2.connect(**self.db_config)
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             
+            # Query per TimescaleDB hypertable - usa timestamp come identificatore principale
             cursor.execute("""
                 SELECT 
+                    COALESCE(id, EXTRACT(EPOCH FROM timestamp)::BIGINT) as id,
+                    timestamp,
                     parameters_changed, 
                     predicted_bit_tq,
                     predicted_energy_saving,
                     predicted_co2_reduction,
                     confidence,
-                    timestamp
+                    savings_eur_hour,
+                    decision_applied,
+                    decision_type
                 FROM ai_decisions 
-                WHERE decision_applied = false 
+                WHERE (decision_applied = false OR decision_applied IS NULL)
                 ORDER BY timestamp DESC 
                 LIMIT 1
             """)
             
             result = cursor.fetchone()
+            conn.close()
+            
             if result:
+                logger.info(f"Found AI decision: ID={result['id']}, timestamp={result['timestamp']}")
                 return {
-                    'parameters_changed': json.loads(result[0]) if result[0] else {},
-                    'predicted_bit_tq': result[1],
-                    'predicted_energy_saving': result[2],
-                    'predicted_co2_reduction': result[3],
-                    'confidence': result[4],
-                    'timestamp': result[5]
+                    'id': result['id'],
+                    'timestamp': result['timestamp'],
+                    'parameters_changed': json.loads(result['parameters_changed']) if result['parameters_changed'] else {},
+                    'predicted_bit_tq': result['predicted_bit_tq'],
+                    'predicted_energy_saving': result['predicted_energy_saving'],
+                    'predicted_co2_reduction': result['predicted_co2_reduction'],
+                    'confidence': result['confidence'],
+                    'savings_eur_hour': result['savings_eur_hour'],
+                    'decision_applied': result['decision_applied'],
+                    'decision_type': result.get('decision_type', 'optimization')
                 }
-            return None
+            else:
+                logger.info("No pending AI decisions found")
+                return None
             
         except Exception as e:
             logger.error(f"Error getting latest AI decision: {e}")
             return None
-        finally:
+    
+    def get_current_process_data(self) -> Optional[Dict]:
+        """Recupera i dati attuali del processo dal database"""
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            cursor.execute("""
+                SELECT 
+                    bit_tq,
+                    energy_consumption,
+                    co2_emissions,
+                    process_efficiency,
+                    data_source,
+                    timestamp,
+                    fc1065,
+                    li40054,
+                    fc31007,
+                    pi18213
+                FROM process_data 
+                ORDER BY timestamp DESC 
+                LIMIT 1
+            """)
+            
+            result = cursor.fetchone()
             conn.close()
+            
+            if result:
+                return dict(result)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting current process data: {e}")
+            return None
     
     async def apply_ai_parameters(self, parameters: Dict) -> bool:
         """Applica i parametri AI al server OPC-UA"""
@@ -93,6 +165,7 @@ class AIDecisionApplier:
             
             if not refinery_node:
                 logger.error("❌ Refinery node not found")
+                await client.disconnect()
                 return False
             
             # Applica i parametri
@@ -105,8 +178,8 @@ class AIDecisionApplier:
                 
                 if var_name in parameters:
                     try:
-                        new_value = parameters[var_name]
-                        await var.write_value(float(new_value))
+                        new_value = float(parameters[var_name])
+                        await var.write_value(new_value)
                         logger.info(f"✅ Applied {var_name}: {new_value}")
                         applied_count += 1
                     except Exception as e:
@@ -129,47 +202,115 @@ class AIDecisionApplier:
             logger.error(f"❌ Error applying AI parameters: {e}")
             return False
     
-    def mark_decision_as_applied(self):
-        """Marca l'ultima decisione come applicata"""
+    def mark_decision_as_applied(self, decision_timestamp):
+        """Marca la decisione come applicata usando il timestamp (chiave naturale per hypertable)"""
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
+            # Per TimescaleDB hypertable, usa timestamp come identificatore
             cursor.execute("""
                 UPDATE ai_decisions 
                 SET decision_applied = true, operator_approved = true
-                WHERE id = (
-                    SELECT id FROM ai_decisions 
-                    WHERE decision_applied = false 
-                    ORDER BY timestamp DESC 
-                    LIMIT 1
-                )
-            """)
+                WHERE timestamp = %s
+            """, (decision_timestamp,))
             
+            rows_affected = cursor.rowcount
             conn.commit()
-            logger.info("✅ Decision marked as applied")
+            conn.close()
+            
+            if rows_affected > 0:
+                logger.info(f"✅ Decision marked as applied (timestamp: {decision_timestamp})")
+                return True
+            else:
+                logger.warning("⚠️ No decision was marked as applied")
+                return False
             
         except Exception as e:
             logger.error(f"Error marking decision as applied: {e}")
-        finally:
-            conn.close()
+            return False
 
 # Inizializza l'applier
 applier = AIDecisionApplier()
 
+@app.route('/api/process/current', methods=['GET'])
+def get_current_process_data():
+    """Endpoint per ottenere i dati attuali del processo"""
+    try:
+        data = applier.get_current_process_data()
+        
+        if data:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'bit_tq': data['bit_tq'],
+                    'energy_consumption': data['energy_consumption'],
+                    'co2_emissions': data['co2_emissions'],
+                    'process_efficiency': data['process_efficiency'],
+                    'data_source': data['data_source'],
+                    'timestamp': data['timestamp'].isoformat() if data['timestamp'] else None,
+                    'is_ai_control': data['data_source'] == 'ai_control',
+                    'fc1065': data.get('fc1065'),
+                    'li40054': data.get('li40054'),
+                    'fc31007': data.get('fc31007'),
+                    'pi18213': data.get('pi18213')
+                }
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No process data found'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting current process data: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        })
+
 @app.route('/api/ai-decisions/latest', methods=['GET'])
 def get_latest_decision():
     """Endpoint per ottenere l'ultima decisione AI"""
-    decision = applier.get_latest_ai_decision()
-    if decision:
-        return jsonify({
-            'success': True,
-            'decision': decision
-        })
-    else:
+    try:
+        decision = applier.get_latest_ai_decision()
+        
+        if decision:
+            return jsonify({
+                'success': True,
+                'decision': decision,
+                'message': f'Decisione AI trovata (timestamp: {decision["timestamp"]})'
+            })
+        else:
+            # Conta il totale delle decisioni per debug
+            try:
+                conn = psycopg2.connect(**applier.db_config)
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM ai_decisions")
+                total_decisions = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM ai_decisions WHERE decision_applied = false OR decision_applied IS NULL")
+                pending_decisions = cursor.fetchone()[0]
+                
+                conn.close()
+                
+                return jsonify({
+                    'success': False,
+                    'message': f'No pending AI decisions found. Total: {total_decisions}, Pending: {pending_decisions}',
+                    'total_decisions': total_decisions,
+                    'pending_decisions': pending_decisions
+                })
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'message': f'No decisions found and could not query database: {str(e)}'
+                })
+            
+    except Exception as e:
+        logger.error(f"Error in get_latest_decision: {e}")
         return jsonify({
             'success': False,
-            'message': 'No pending AI decisions found'
+            'message': f'Error: {str(e)}'
         })
 
 @app.route('/api/ai-decisions/apply', methods=['POST'])
@@ -184,19 +325,24 @@ def apply_ai_decision():
                 'message': 'No pending AI decisions to apply'
             })
         
+        logger.info(f"Applying AI decision: {decision['timestamp']}")
+        
         # Applica i parametri
         success = asyncio.run(applier.apply_ai_parameters(decision['parameters_changed']))
         
         if success:
-            # Marca come applicata
-            applier.mark_decision_as_applied()
+            # Marca come applicata usando il timestamp
+            mark_success = applier.mark_decision_as_applied(decision['timestamp'])
             
             return jsonify({
                 'success': True,
                 'message': 'AI decision applied successfully',
                 'applied_parameters': decision['parameters_changed'],
                 'predicted_bit_tq': decision['predicted_bit_tq'],
-                'confidence': decision['confidence']
+                'confidence': decision['confidence'],
+                'decision_id': decision['id'],
+                'timestamp': decision['timestamp'].isoformat(),
+                'marked_as_applied': mark_success
             })
         else:
             return jsonify({
@@ -242,111 +388,50 @@ def reset_to_human_control():
             'success': False,
             'message': f'Error resetting process: {str(e)}'
         })
-        
-# Aggiungi questi endpoint al file api-server/app.py
-
-@app.route('/api/process/current', methods=['GET'])
-def get_current_process_data():
-    """Endpoint per ottenere i dati attuali del processo"""
-    try:
-        conn = psycopg2.connect(**applier.db_config)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT 
-                bit_tq,
-                energy_consumption,
-                co2_emissions,
-                process_efficiency,
-                data_source,
-                timestamp
-            FROM process_data 
-            ORDER BY timestamp DESC 
-            LIMIT 1
-        """)
-        
-        result = cursor.fetchone()
-        if result:
-            return jsonify({
-                'success': True,
-                'data': {
-                    'bit_tq': result[0],
-                    'energy_consumption': result[1],
-                    'co2_emissions': result[2],
-                    'process_efficiency': result[3],
-                    'data_source': result[4],
-                    'timestamp': result[5].isoformat() if result[5] else None,
-                    'is_ai_control': result[4] == 'ai_control'
-                }
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'No process data found'
-            })
-            
-    except Exception as e:
-        logger.error(f"Error getting current process data: {e}")
-        return jsonify({
-            'success': False,
-            'message': f'Error: {str(e)}'
-        })
-    finally:
-        conn.close()
 
 @app.route('/api/ai-decisions/force-generate', methods=['POST'])
 def force_generate_ai_decision():
-    """Endpoint per forzare la generazione di una decisione AI"""
+    """Endpoint per forzare la generazione di una decisione AI - per TimescaleDB"""
     try:
-        # Questo endpoint può essere chiamato per creare una decisione AI 
-        # anche quando BIT-TQ è accettabile, utile per demo
+        # Assicura che la colonna ID esista (non PRIMARY KEY)
+        applier.ensure_id_column_exists()
         
-        conn = psycopg2.connect(**applier.db_config)
-        cursor = conn.cursor()
-        
-        # Ottieni dati attuali
-        cursor.execute("""
-            SELECT fc1065, li40054, fc31007, pi18213, bit_tq, energy_consumption, co2_emissions
-            FROM process_data 
-            ORDER BY timestamp DESC 
-            LIMIT 1
-        """)
-        
-        result = cursor.fetchone()
-        if not result:
+        current_data = applier.get_current_process_data()
+        if not current_data:
             return jsonify({
                 'success': False,
-                'message': 'No process data available'
+                'message': 'No process data available to generate AI decision'
             })
         
-        # Simula una decisione AI
-        from datetime import datetime
-        import json
+        current_bit_tq = current_data['bit_tq'] or 45.0
+        target_improvement = max(2.0, 52.0 - current_bit_tq)
         
-        # Crea parametri di ottimizzazione per demo
-        current_bit_tq = result[4] or 45.0
-        target_improvement = 55.0 - current_bit_tq if current_bit_tq < 55.0 else 2.0
-        
+        # Parametri di ottimizzazione basati sui dati attuali
         optimized_params = {
-            'fc1065': (result[0] or 127.3) * 1.04,  # +4% 
-            'li40054': (result[1] or 68.2) * 1.05,  # +5%
-            'fc31007': (result[2] or 89.1) * 0.97,  # -3%
-            'pi18213': (result[3] or 2.14) * 1.04   # +4%
+            'fc1065': (current_data.get('fc1065') or 127.3) * 1.04,
+            'li40054': (current_data.get('li40054') or 68.2) * 1.05,
+            'fc31007': (current_data.get('fc31007') or 89.1) * 0.97,
+            'pi18213': (current_data.get('pi18213') or 2.14) * 1.04
         }
         
         baseline_params = {
-            'fc1065': result[0] or 127.3,
-            'li40054': result[1] or 68.2,
-            'fc31007': result[2] or 89.1,
-            'pi18213': result[3] or 2.14
+            'fc1065': current_data.get('fc1065') or 127.3,
+            'li40054': current_data.get('li40054') or 68.2,
+            'fc31007': current_data.get('fc31007') or 89.1,
+            'pi18213': current_data.get('pi18213') or 2.14
         }
         
         predicted_bit_tq = min(58.0, current_bit_tq + target_improvement)
-        energy_saving = 0.08  # 8% risparmio energetico
-        co2_reduction = 0.12  # 12% riduzione CO2
-        hourly_savings = 185.0  # €185/ora
+        energy_saving = 0.08
+        co2_reduction = 0.12
+        hourly_savings = 185.0
         
-        # Inserisci decisione forzata
+        # Inserisci decisione nel database (senza RETURNING per TimescaleDB)
+        conn = psycopg2.connect(**applier.db_config)
+        cursor = conn.cursor()
+        
+        decision_timestamp = datetime.now()
+        
         cursor.execute("""
             INSERT INTO ai_decisions (
                 timestamp, decision_type, confidence, predicted_bit_tq,
@@ -355,31 +440,36 @@ def force_generate_ai_decision():
                 anomaly_detected, decision_applied
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
-            datetime.now(),
+            decision_timestamp,
             'forced_optimization',
-            0.82,  # 82% confidenza
+            0.82,
             predicted_bit_tq,
             energy_saving,
             co2_reduction,
             json.dumps(optimized_params),
             json.dumps(baseline_params),
             hourly_savings,
-            False,
-            False  # Non ancora applicata
+            current_bit_tq < 45.0,
+            False
         ))
         
         conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Forced AI decision generated at: {decision_timestamp}")
         
         return jsonify({
             'success': True,
-            'message': 'AI decision generated successfully',
+            'message': f'AI decision generated successfully',
+            'decision_timestamp': decision_timestamp.isoformat(),
             'decision': {
                 'predicted_bit_tq': predicted_bit_tq,
                 'energy_saving_pct': energy_saving * 100,
                 'co2_reduction_pct': co2_reduction * 100,
                 'hourly_savings_eur': hourly_savings,
                 'confidence': 0.82,
-                'parameters_count': len(optimized_params)
+                'parameters_count': len(optimized_params),
+                'current_bit_tq': current_bit_tq
             }
         })
         
@@ -389,26 +479,27 @@ def force_generate_ai_decision():
             'success': False,
             'message': f'Error: {str(e)}'
         })
-    finally:
-        conn.close()
 
-# Modifica anche l'endpoint di status per includere più informazioni
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """Endpoint per lo status dettagliato dell'API"""
     try:
-        # Test connessione database
         conn = psycopg2.connect(**applier.db_config)
         cursor = conn.cursor()
+        
         cursor.execute("SELECT COUNT(*) FROM process_data")
         data_count = cursor.fetchone()[0]
         
-        cursor.execute("SELECT COUNT(*) FROM ai_decisions WHERE decision_applied = false")
+        cursor.execute("SELECT COUNT(*) FROM ai_decisions WHERE decision_applied = false OR decision_applied IS NULL")
         pending_decisions = cursor.fetchone()[0]
         
-        cursor.execute("SELECT bit_tq FROM process_data ORDER BY timestamp DESC LIMIT 1")
-        current_bit_tq = cursor.fetchone()
-        current_bit_tq = current_bit_tq[0] if current_bit_tq else None
+        cursor.execute("SELECT COUNT(*) FROM ai_decisions")
+        total_decisions = cursor.fetchone()[0]
+        
+        # Ottieni dati processo attuali
+        current_data = applier.get_current_process_data()
+        current_bit_tq = current_data['bit_tq'] if current_data else None
+        current_source = current_data['data_source'] if current_data else None
         
         conn.close()
         
@@ -417,9 +508,13 @@ def get_status():
             'message': 'AI Decision API is running',
             'system_status': {
                 'database_connected': True,
+                'database_type': 'TimescaleDB hypertable',
                 'total_data_points': data_count,
                 'pending_ai_decisions': pending_decisions,
+                'total_ai_decisions': total_decisions,
                 'current_bit_tq': current_bit_tq,
+                'current_data_source': current_source,
+                'is_ai_control': current_source == 'ai_control' if current_source else False,
                 'last_check': datetime.now().isoformat()
             },
             'endpoints': [
@@ -433,6 +528,7 @@ def get_status():
         })
         
     except Exception as e:
+        logger.error(f"Error in status endpoint: {e}")
         return jsonify({
             'success': False,
             'message': f'API running but database error: {str(e)}',
@@ -443,5 +539,5 @@ def get_status():
         })
 
 if __name__ == '__main__':
-    logger.info("🚀 Starting AI Decision API Server...")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    logger.info("🚀 Starting AI Decision API Server for TimescaleDB...")
+    app.run(host='0.0.0.0', port=5000, debug=True)

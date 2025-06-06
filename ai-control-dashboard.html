@@ -108,6 +108,17 @@
             box-shadow: 0 4px 15px rgba(229, 62, 62, 0.4);
         }
         
+        .btn-info {
+            background: linear-gradient(135deg, #3182ce, #63b3ed);
+            color: white;
+        }
+        
+        .btn-info:hover {
+            background: linear-gradient(135deg, #2c5282, #3182ce);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(49, 130, 206, 0.4);
+        }
+        
         .btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
@@ -153,6 +164,7 @@
             z-index: 1000;
             transform: translateX(400px);
             transition: transform 0.3s ease;
+            max-width: 350px;
         }
         
         .notification.show {
@@ -205,6 +217,14 @@
             font-size: 0.9em;
             color: #a0aec0;
         }
+        
+        .metrics-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
     </style>
 </head>
 <body>
@@ -220,9 +240,18 @@
             <div class="control-card">
                 <h3>📊 Stato Attuale</h3>
                 <div id="current-status">
-                    <div class="metric">
-                        <div class="metric-value" id="current-bittq">--</div>
-                        <div class="metric-label">BIT-TQ Attuale</div>
+                    <div class="metrics-row">
+                        <div class="metric">
+                            <div class="metric-value" id="current-bittq">--</div>
+                            <div class="metric-label">BIT-TQ Attuale</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="current-energy">--</div>
+                            <div class="metric-label">Energia (MWh)</div>
+                        </div>
+                    </div>
+                    <div id="control-mode-indicator" class="metric-label" style="margin-top: 10px;">
+                        Modalità: --
                     </div>
                 </div>
                 <button class="btn btn-primary" onclick="checkStatus()" id="check-status-btn">
@@ -235,8 +264,11 @@
                 <button class="btn btn-warning" onclick="getLatestDecision()" id="get-decision-btn">
                     📋 Visualizza Ultima Decisione
                 </button>
+                <button class="btn btn-info" onclick="forceGenerateDecision()" id="force-decision-btn">
+                    ⚡ Genera Decisione AI
+                </button>
                 <button class="btn btn-primary" onclick="applyAIDecision()" id="apply-decision-btn">
-                    ⚡ Applica Decisione AI
+                    🚀 Applica Decisione AI
                 </button>
             </div>
             
@@ -278,17 +310,20 @@
             
             setTimeout(() => {
                 notification.classList.remove('show');
-            }, 4000);
+            }, 5000);
         }
         
         function setButtonLoading(buttonId, loading = true) {
             const button = document.getElementById(buttonId);
             if (loading) {
                 button.disabled = true;
-                button.innerHTML = '<span class="loading"></span>' + button.textContent;
+                const originalText = button.textContent;
+                button.setAttribute('data-original-text', originalText);
+                button.innerHTML = '<span class="loading"></span>' + originalText;
             } else {
                 button.disabled = false;
-                button.innerHTML = button.textContent.replace(/^.*?(?=[A-Za-z])/, '');
+                const originalText = button.getAttribute('data-original-text');
+                button.innerHTML = originalText;
             }
         }
         
@@ -316,17 +351,37 @@
             setButtonLoading('check-status-btn', true);
             
             try {
-                const status = await apiCall('/status');
-                showNotification('✅ Sistema API funzionante', 'success');
+                // Usa l'endpoint corretto per ottenere i dati attuali del processo
+                const processData = await apiCall('/process/current');
+                const systemStatus = await apiCall('/status');
                 
-                // Simula recupero BIT-TQ attuale (potresti implementare un endpoint specifico)
-                const currentBitTq = 45.2 + Math.random() * 10; // Simulated
-                document.getElementById('current-bittq').textContent = currentBitTq.toFixed(1);
-                
-                document.getElementById('status-text').innerHTML = 
-                    `<strong>✅ Sistema Operativo</strong><br>
-                     API Server: Attivo<br>
-                     Ultimo aggiornamento: ${new Date().toLocaleTimeString()}`;
+                if (processData.success && processData.data) {
+                    const data = processData.data;
+                    
+                    // Aggiorna i valori reali dal database
+                    document.getElementById('current-bittq').textContent = data.bit_tq?.toFixed(1) || '--';
+                    document.getElementById('current-energy').textContent = data.energy_consumption?.toFixed(0) || '--';
+                    
+                    // Aggiorna indicatore modalità controllo
+                    const controlMode = data.is_ai_control ? '🤖 AI Control' : '👨‍🔧 Human Control';
+                    document.getElementById('control-mode-indicator').textContent = `Modalità: ${controlMode}`;
+                    
+                    showNotification('✅ Dati processo aggiornati dal database', 'success');
+                    
+                    // Aggiorna status display con informazioni dettagliate
+                    document.getElementById('status-text').innerHTML = 
+                        `<strong>✅ Sistema Operativo</strong><br>
+                         BIT-TQ Attuale: ${data.bit_tq?.toFixed(1)} dmm<br>
+                         Energia: ${data.energy_consumption?.toFixed(0)} MWh<br>
+                         Modalità: ${controlMode}<br>
+                         Fonte Dati: ${data.data_source}<br>
+                         Ultimo aggiornamento: ${new Date(data.timestamp).toLocaleString()}`;
+                         
+                } else {
+                    showNotification('⚠️ Dati processo non disponibili', 'error');
+                    document.getElementById('status-text').innerHTML = 
+                        '<strong>⚠️ Errore Dati</strong><br>Impossibile recuperare i dati attuali del processo';
+                }
                 
             } catch (error) {
                 showNotification('❌ Errore connessione API: ' + error.message, 'error');
@@ -345,25 +400,65 @@
                 
                 if (result.success && result.decision) {
                     const decision = result.decision;
-                    showNotification('📋 Decisione AI trovata!', 'info');
+                    showNotification('📋 Decisione AI trovata! ID: ' + decision.id, 'info');
                     
                     document.getElementById('status-text').innerHTML = 
-                        `<strong>🤖 Ultima Decisione AI</strong><br>
+                        `<strong>🤖 Ultima Decisione AI (ID: ${decision.id})</strong><br>
                          Confidenza: ${(decision.confidence * 100).toFixed(1)}%<br>
-                         BIT-TQ Previsto: ${decision.predicted_bit_tq?.toFixed(1) || 'N/A'}<br>
+                         BIT-TQ Previsto: ${decision.predicted_bit_tq?.toFixed(1) || 'N/A'} dmm<br>
                          Risparmio Energetico: ${(decision.predicted_energy_saving * 100).toFixed(1)}%<br>
-                         Timestamp: ${new Date(decision.timestamp).toLocaleString()}`;
+                         Risparmio CO2: ${(decision.predicted_co2_reduction * 100).toFixed(1)}%<br>
+                         Risparmio Economico: €${decision.savings_eur_hour?.toFixed(0) || 'N/A'}/h<br>
+                         Parametri da modificare: ${Object.keys(decision.parameters_changed).length}<br>
+                         Timestamp: ${new Date(decision.timestamp).toLocaleString()}<br>
+                         <em>Usa "Applica Decisione AI" per implementare i cambiamenti</em>`;
                          
                 } else {
-                    showNotification('ℹ️ Nessuna decisione AI in attesa', 'info');
+                    const totalDecisions = result.total_decisions || 0;
+                    showNotification(`ℹ️ Nessuna decisione in attesa (${totalDecisions} totali nel DB)`, 'info');
                     document.getElementById('status-text').innerHTML = 
-                        '<strong>ℹ️ Nessuna Decisione in Attesa</strong><br>Il sistema non ha generato nuove raccomandazioni';
+                        `<strong>ℹ️ Nessuna Decisione in Attesa</strong><br>
+                         Decisioni totali nel database: ${totalDecisions}<br>
+                         Il sistema non ha generato nuove raccomandazioni<br>
+                         <em>Usa "Genera Decisione AI" per crearne una nuova</em>`;
                 }
                 
             } catch (error) {
                 showNotification('❌ Errore recupero decisione: ' + error.message, 'error');
             } finally {
                 setButtonLoading('get-decision-btn', false);
+            }
+        }
+        
+        async function forceGenerateDecision() {
+            setButtonLoading('force-decision-btn', true);
+            
+            try {
+                const result = await apiCall('/ai-decisions/force-generate', 'POST');
+                
+                if (result.success) {
+                    const decision = result.decision;
+                    showNotification(`🧠 Nuova decisione AI generata! ID: ${result.decision_id}`, 'success');
+                    
+                    document.getElementById('status-text').innerHTML = 
+                        `<strong>✅ Decisione AI Generata (ID: ${result.decision_id})</strong><br>
+                         BIT-TQ Attuale: ${decision.current_bit_tq?.toFixed(1)} dmm<br>
+                         BIT-TQ Previsto: ${decision.predicted_bit_tq?.toFixed(1)} dmm<br>
+                         Confidenza: ${(decision.confidence * 100).toFixed(1)}%<br>
+                         Risparmio Energetico: ${decision.energy_saving_pct?.toFixed(1)}%<br>
+                         Risparmio CO2: ${decision.co2_reduction_pct?.toFixed(1)}%<br>
+                         Risparmio Economico: €${decision.hourly_savings_eur?.toFixed(0)}/h<br>
+                         Parametri da ottimizzare: ${decision.parameters_count}<br>
+                         <em>Usa "Applica Decisione AI" per implementare</em>`;
+                         
+                } else {
+                    showNotification('❌ ' + (result.message || 'Errore generazione decisione'), 'error');
+                }
+                
+            } catch (error) {
+                showNotification('❌ Errore generazione: ' + error.message, 'error');
+            } finally {
+                setButtonLoading('force-decision-btn', false);
             }
         }
         
@@ -378,17 +473,21 @@
                 const result = await apiCall('/ai-decisions/apply', 'POST');
                 
                 if (result.success) {
-                    showNotification('🚀 Decisione AI applicata con successo!', 'success');
+                    showNotification(`🚀 Decisione AI applicata! ID: ${result.decision_id}`, 'success');
                     
                     document.getElementById('status-text').innerHTML = 
-                        `<strong>✅ Decisione AI Applicata</strong><br>
-                         BIT-TQ Previsto: ${result.predicted_bit_tq?.toFixed(1) || 'N/A'}<br>
+                        `<strong>✅ Decisione AI Applicata (ID: ${result.decision_id})</strong><br>
+                         BIT-TQ Previsto: ${result.predicted_bit_tq?.toFixed(1) || 'N/A'} dmm<br>
                          Confidenza: ${(result.confidence * 100).toFixed(1)}%<br>
                          Parametri modificati: ${Object.keys(result.applied_parameters || {}).length}<br>
+                         Modalità: 🤖 AI Control attivata<br>
                          <em>Controlla i grafici per vedere i miglioramenti!</em>`;
                     
-                    // Refresh automatico dashboard dopo 2 secondi
-                    setTimeout(refreshDashboard, 2000);
+                    // Refresh automatico dashboard dopo 3 secondi
+                    setTimeout(() => {
+                        refreshDashboard();
+                        checkStatus(); // Aggiorna anche lo stato
+                    }, 3000);
                     
                 } else {
                     showNotification('⚠️ ' + (result.message || 'Errore applicazione decisione'), 'error');
@@ -417,10 +516,14 @@
                     document.getElementById('status-text').innerHTML = 
                         `<strong>🔄 Controllo Umano Attivato</strong><br>
                          Parametri ripristinati ai valori baseline<br>
-                         Modalità: Controllo Manuale<br>
-                         Timestamp: ${new Date().toLocaleString()}`;
+                         Modalità: 👨‍🔧 Controllo Manuale<br>
+                         Timestamp: ${new Date().toLocaleString()}<br>
+                         <em>Tutti i parametri sono tornati ai valori standard</em>`;
                     
-                    setTimeout(refreshDashboard, 2000);
+                    setTimeout(() => {
+                        refreshDashboard();
+                        checkStatus();
+                    }, 2000);
                     
                 } else {
                     showNotification('❌ ' + (result.message || 'Errore reset sistema'), 'error');
@@ -443,24 +546,28 @@
             const separator = currentSrc.includes('?') ? '&' : '?';
             iframe.src = currentSrc.split('&_refresh=')[0] + separator + '_refresh=' + Date.now();
             
-            showNotification('🔄 Dashboard aggiornata', 'info');
+            showNotification('🔄 Dashboard Grafana aggiornata', 'info');
             
             setTimeout(() => {
                 setButtonLoading('refresh-btn', false);
             }, 1000);
         }
         
-        // Auto-refresh ogni 30 secondi
+        // Auto-refresh ogni 30 secondi (solo se la pagina è visibile)
         setInterval(() => {
             if (!document.hidden) {
                 checkStatus();
             }
         }, 30000);
         
-        // Inizializzazione
+        // Inizializzazione al caricamento della pagina
         document.addEventListener('DOMContentLoaded', () => {
-            checkStatus();
             showNotification('🎉 Dashboard AI Control caricata!', 'success');
+            
+            // Avvia il primo check dopo 1 secondo
+            setTimeout(() => {
+                checkStatus();
+            }, 1000);
         });
     </script>
 </body>
