@@ -18,12 +18,12 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
+  "id": 2,
   "links": [],
   "panels": [
     {
       "datasource": {
-        "type": "grafana-postgresql-datasource",
+        "type": "postgres",
         "uid": "P40AE60E18F02DE32"
       },
       "fieldConfig": {
@@ -65,12 +65,13 @@
             }
           },
           "mappings": [],
+          "max": 65,
+          "min": 35,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -86,9 +87,7 @@
               }
             ]
           },
-          "unit": "dmm",
-          "min": 35,
-          "max": 65
+          "unit": "dmm"
         },
         "overrides": [
           {
@@ -107,7 +106,10 @@
               {
                 "id": "custom.lineStyle",
                 "value": {
-                  "dash": [10, 10],
+                  "dash": [
+                    10,
+                    10
+                  ],
                   "fill": "dash"
                 }
               },
@@ -128,7 +130,9 @@
       "id": 1,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -139,16 +143,17 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "12.0.1",
       "targets": [
         {
           "datasource": {
-            "type": "grafana-postgresql-datasource",
+            "type": "postgres",
             "uid": "P40AE60E18F02DE32"
           },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT \\n    p.timestamp as time,\\n    p.bit_tq as \\\"BIT-TQ Attuale\\\",\\n    50 as \\\"Target\\\",\\n    CASE \\n        WHEN p.data_source = 'ai_control' THEN p.bit_tq\\n        ELSE NULL\\n    END as \\\"AI Control\\\"\\nFROM process_data p\\nWHERE $__timeFilter(p.timestamp) \\nORDER BY p.timestamp ASC",
+          "rawSql": "SELECT \n    p.timestamp as time,\n    p.bit_tq as \"BIT-TQ Attuale\",\n    50 as \"Target\",\n    CASE \n        WHEN p.data_source = 'ai_control' THEN p.bit_tq\n        ELSE NULL\n    END as \"AI Control\"\nFROM process_data p\nWHERE $__timeFilter(p.timestamp) \nORDER BY p.timestamp ASC",
           "refId": "A"
         }
       ],
@@ -157,20 +162,427 @@
     },
     {
       "datasource": {
-        "type": "-"
+        "type": "postgres",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          }
+        },
+        "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
+        "h": 4,
+        "w": 4,
         "x": 16,
         "y": 0
       },
-      "id": 9,
+      "id": 2,
       "options": {
-        "content": "<div style=\\\"background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; text-align: center; height: 100%; display: flex; flex-direction: column; justify-content: space-around;\\\">\\n\\n<h2 style=\\\"color: white; margin: 0;\\\">🤖 AI Control Panel</h2>\\n\\n<div style=\\\"background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; margin: 10px 0;\\\">\\n<h3 style=\\\"color: white; margin: 0 0 10px 0;\\\">Latest AI Decision</h3>\\n<div id=\\\"ai-decision-info\\\" style=\\\"color: #f0f0f0; font-size: 14px;\\\">\\nLoading...\\n</div>\\n</div>\\n\\n<div style=\\\"display: flex; gap: 10px; justify-content: center;\\\">\\n<button id=\\\"apply-ai-btn\\\" onclick=\\\"applyAIDecision()\\\" style=\\\"\\n    background: linear-gradient(45deg, #4CAF50, #45a049);\\n    color: white;\\n    border: none;\\n    padding: 12px 20px;\\n    border-radius: 25px;\\n    cursor: pointer;\\n    font-weight: bold;\\n    box-shadow: 0 4px 8px rgba(0,0,0,0.2);\\n    transition: all 0.3s ease;\\n    flex: 1;\\n\\\" onmouseover=\\\"this.style.transform='scale(1.05)'\\\" onmouseout=\\\"this.style.transform='scale(1)'\\\">\\n✨ Apply AI Decision\\n</button>\\n\\n<button id=\\\"reset-btn\\\" onclick=\\\"resetToHuman()\\\" style=\\\"\\n    background: linear-gradient(45deg, #ff6b6b, #ff5252);\\n    color: white;\\n    border: none;\\n    padding: 12px 20px;\\n    border-radius: 25px;\\n    cursor: pointer;\\n    font-weight: bold;\\n    box-shadow: 0 4px 8px rgba(0,0,0,0.2);\\n    transition: all 0.3s ease;\\n    flex: 1;\\n\\\" onmouseover=\\\"this.style.transform='scale(1.05)'\\\" onmouseout=\\\"this.style.transform='scale(1)'\\\">\\n🔄 Reset to Human\\n</button>\\n</div>\\n\\n<div id=\\\"status-message\\\" style=\\\"color: #f0f0f0; margin-top: 15px; font-size: 12px; min-height: 20px;\\\">\\nReady for AI optimization\\n</div>\\n\\n</div>\\n\\n<script>\\nlet apiBaseUrl = 'http://localhost:5000/api';\\n\\nasync function loadLatestDecision() {\\n    try {\\n        const response = await fetch(`${apiBaseUrl}/ai-decisions/latest`);\\n        const data = await response.json();\\n        \\n        const infoDiv = document.getElementById('ai-decision-info');\\n        \\n        if (data.success && data.decision) {\\n            const decision = data.decision;\\n            infoDiv.innerHTML = `\\n                <div style=\\\"text-align: left;\\\">\\n                    <strong>Predicted BIT-TQ:</strong> ${decision.predicted_bit_tq.toFixed(1)} dmm<br>\\n                    <strong>Confidence:</strong> ${(decision.confidence * 100).toFixed(0)}%<br>\\n                    <strong>Energy Saving:</strong> ${(decision.predicted_energy_saving * 100).toFixed(1)}%<br>\\n                    <strong>CO2 Reduction:</strong> ${(decision.predicted_co2_reduction * 100).toFixed(1)}%\\n                </div>\\n            `;\\n            document.getElementById('apply-ai-btn').disabled = false;\\n        } else {\\n            infoDiv.innerHTML = '<em>No pending AI decisions</em>';\\n            document.getElementById('apply-ai-btn').disabled = true;\\n        }\\n    } catch (error) {\\n        console.error('Error loading AI decision:', error);\\n        document.getElementById('ai-decision-info').innerHTML = '<em>API connection failed</em>';\\n    }\\n}\\n\\nasync function applyAIDecision() {\\n    const btn = document.getElementById('apply-ai-btn');\\n    const statusDiv = document.getElementById('status-message');\\n    \\n    btn.disabled = true;\\n    btn.innerHTML = '⏳ Applying...';\\n    statusDiv.innerHTML = 'Applying AI optimization to OPC-UA server...';\\n    \\n    try {\\n        const response = await fetch(`${apiBaseUrl}/ai-decisions/apply`, {\\n            method: 'POST',\\n            headers: {\\n                'Content-Type': 'application/json'\\n            }\\n        });\\n        \\n        const data = await response.json();\\n        \\n        if (data.success) {\\n            statusDiv.innerHTML = `✅ AI decision applied successfully! Predicted BIT-TQ: ${data.predicted_bit_tq.toFixed(1)} dmm`;\\n            statusDiv.style.color = '#4CAF50';\\n            \\n            setTimeout(() => {\\n                loadLatestDecision();\\n                statusDiv.style.color = '#f0f0f0';\\n                statusDiv.innerHTML = 'AI optimization active - monitoring results...';\\n            }, 3000);\\n        } else {\\n            statusDiv.innerHTML = `❌ Failed: ${data.message}`;\\n            statusDiv.style.color = '#ff6b6b';\\n        }\\n    } catch (error) {\\n        statusDiv.innerHTML = `❌ Error: ${error.message}`;\\n        statusDiv.style.color = '#ff6b6b';\\n    } finally {\\n        btn.disabled = false;\\n        btn.innerHTML = '✨ Apply AI Decision';\\n        \\n        setTimeout(() => {\\n            statusDiv.style.color = '#f0f0f0';\\n        }, 5000);\\n    }\\n}\\n\\nasync function resetToHuman() {\\n    const btn = document.getElementById('reset-btn');\\n    const statusDiv = document.getElementById('status-message');\\n    \\n    btn.disabled = true;\\n    btn.innerHTML = '⏳ Resetting...';\\n    statusDiv.innerHTML = 'Resetting to human control...';\\n    \\n    try {\\n        const response = await fetch(`${apiBaseUrl}/process/reset`, {\\n            method: 'POST',\\n            headers: {\\n                'Content-Type': 'application/json'\\n            }\\n        });\\n        \\n        const data = await response.json();\\n        \\n        if (data.success) {\\n            statusDiv.innerHTML = '✅ Process reset to human control';\\n            statusDiv.style.color = '#4CAF50';\\n            \\n            setTimeout(() => {\\n                loadLatestDecision();\\n                statusDiv.style.color = '#f0f0f0';\\n                statusDiv.innerHTML = 'Ready for AI optimization';\\n            }, 3000);\\n        } else {\\n            statusDiv.innerHTML = `❌ Reset failed: ${data.message}`;\\n            statusDiv.style.color = '#ff6b6b';\\n        }\\n    } catch (error) {\\n        statusDiv.innerHTML = `❌ Error: ${error.message}`;\\n        statusDiv.style.color = '#ff6b6b';\\n    } finally {\\n        btn.disabled = false;\\n        btn.innerHTML = '🔄 Reset to Human';\\n        \\n        setTimeout(() => {\\n            statusDiv.style.color = '#f0f0f0';\\n        }, 5000);\\n    }\\n}\\n\\nloadLatestDecision();\\nsetInterval(loadLatestDecision, 10000);\\n</script>",
-        "mode": "html"
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
-      "pluginVersion": "11.3.0",
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) as value FROM ai_decisions",
+          "refId": "A"
+        }
+      ],
+      "title": "🤖 AI Decisions",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 200
+              }
+            ]
+          },
+          "unit": "€/h"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(SUM(savings_eur_hour), 0) as value FROM ai_decisions WHERE decision_applied = true",
+          "refId": "A"
+        }
+      ],
+      "title": "💰 AI Savings",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red"
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 85
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 4
+      },
+      "id": 7,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(process_efficiency, 75) as value FROM process_data ORDER BY timestamp DESC LIMIT 1",
+          "refId": "A"
+        }
+      ],
+      "title": "🚀 Efficiency",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              }
+            ]
+          },
+          "unit": "MWh"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT timestamp as time, energy_consumption as \"Energy (MWh)\" FROM process_data WHERE $__timeFilter(timestamp) ORDER BY timestamp ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "⚡ Energy Consumption",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "P40AE60E18F02DE32"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              }
+            ]
+          },
+          "unit": "ton/h"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "P40AE60E18F02DE32"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT timestamp as time, co2_emissions as \"CO2 (ton/h)\" FROM process_data WHERE $__timeFilter(timestamp) ORDER BY timestamp ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "🌱 CO2 Emissions",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "# 🤖 AI Control Panel\n\n## Manual Control\n\nUse the API endpoints to control the AI system:\n\n### Check Latest Decision\n```bash\ncurl http://localhost:5000/api/ai-decisions/latest\n```\n\n### Apply AI Decision\n```bash\ncurl -X POST http://localhost:5000/api/ai-decisions/apply\n```\n\n### Reset to Human Control\n```bash\ncurl -X POST http://localhost:5000/api/process/reset\n```\n\n---\n\n**Status**: Ready for AI optimization\n\n**API Server**: http://localhost:5000/api/",
+        "mode": "markdown"
+      },
+      "pluginVersion": "12.0.1",
       "title": "AI Control Panel",
       "type": "text"
     }
@@ -178,7 +590,11 @@
   "preload": false,
   "refresh": "5s",
   "schemaVersion": 41,
-  "tags": ["demo", "ai", "refinery"],
+  "tags": [
+    "demo",
+    "ai",
+    "refinery"
+  ],
   "templating": {
     "list": []
   },
@@ -190,5 +606,5 @@
   "timezone": "browser",
   "title": "Demo - Refinery AI Analytics Enhanced",
   "uid": "dashboard-demo-refinery-enhanced",
-  "version": 1
+  "version": 16
 }
